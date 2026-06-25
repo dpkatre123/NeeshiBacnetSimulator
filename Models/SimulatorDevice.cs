@@ -8,7 +8,7 @@ namespace BacnetSim.Models
     {
         private uint _deviceInstance = 1234;
         private string _deviceName = "NeeshiBacnetSim";
-        private string _vendorName = "Antigravity Labs";
+        private string _vendorName = "Riddhi Technologies";
         private string _modelName = "NeeshiBacnetSim v1.0";
         private string _networkInterface = "0.0.0.0";
         private int _port = 47808;
