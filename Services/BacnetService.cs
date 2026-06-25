@@ -35,35 +35,52 @@ namespace BacnetSim.Services
             if (_running) return;
             _pointMap.Clear();
 
-            // 1. Write XML to a temp file (DeviceStorage.Load only accepts file path)
-            _tmpXmlPath = Path.Combine(Path.GetTempPath(), $"bacnet_sim_{device.DeviceInstance}.xml");
-            var xml = BuildXml(device);
-            File.WriteAllText(_tmpXmlPath, xml);
-            Log($"Storage XML written to: {_tmpXmlPath}");
+            try
+            {
+                // 1. Write XML to a temp file (DeviceStorage.Load only accepts file path)
+                _tmpXmlPath = Path.Combine(Path.GetTempPath(), $"bacnet_sim_{device.DeviceInstance}.xml");
+                var xml = BuildXml(device);
+                File.WriteAllText(_tmpXmlPath, xml);
+                Log($"Storage XML written to: {_tmpXmlPath}");
 
-            // 2. Load storage from file
-            _storage = DeviceStorage.Load(_tmpXmlPath, device.DeviceInstance);
+                // 2. Load storage from file
+                try
+                {
+                    _storage = DeviceStorage.Load(_tmpXmlPath, device.DeviceInstance);
+                    Log($"Storage loaded. Device {_storage?.DeviceId}");
+                }
+                catch (Exception storageEx)
+                {
+                    Log($"[ERROR] Storage load failed: {storageEx.Message}");
+                    _storage = null;
+                }
 
-            // 3. Register point map for write-back
-            foreach (var pt in device.Points)
-                _pointMap[ToObjectId(pt)] = pt;
+                // 3. Register point map for write-back
+                foreach (var pt in device.Points)
+                    _pointMap[ToObjectId(pt)] = pt;
 
-            // 4. Start BACnet/IP UDP server
-            var transport = new BacnetIpUdpProtocolTransport(device.Port, false);
-            _client = new BacnetClient(transport);
+                // 4. Start BACnet/IP UDP server
+                var transport = new BacnetIpUdpProtocolTransport(device.Port, false);
+                _client = new BacnetClient(transport);
 
-            _client.OnWhoIs                       += OnWhoIs;
-            _client.OnReadPropertyRequest         += OnReadPropertyRequest;
-            _client.OnWritePropertyRequest        += OnWritePropertyRequest;
-            _client.OnReadPropertyMultipleRequest += OnReadPropertyMultipleRequest;
+                _client.OnWhoIs                       += OnWhoIs;
+                _client.OnReadPropertyRequest         += OnReadPropertyRequest;
+                _client.OnWritePropertyRequest        += OnWritePropertyRequest;
+                _client.OnReadPropertyMultipleRequest += OnReadPropertyMultipleRequest;
 
-            _client.Start();
-            _running = true;
-            Log($"Started BACnet/IP · Device {device.DeviceInstance} · Port {device.Port}");
+                _client.Start();
+                _running = true;
+                Log($"Started BACnet/IP · Device {device.DeviceInstance} · Port {device.Port}");
 
-            // Announce ourselves on the network so clients discover us immediately
-            _client.Iam(device.DeviceInstance, BacnetSegmentations.SEGMENTATION_NONE);
-            Log("I-Am broadcast sent.");
+                // Announce ourselves on the network so clients discover us immediately
+                _client.Iam(device.DeviceInstance, BacnetSegmentations.SEGMENTATION_NONE);
+                Log("I-Am broadcast sent.");
+            }
+            catch (Exception ex)
+            {
+                Log($"[ERROR] Start failed: {ex.Message}");
+                Stop();
+            }
         }
 
         public void Stop()
@@ -157,6 +174,24 @@ namespace BacnetSim.Services
             var xmlType = XmlObjType(pt.ObjectType);
             sb.AppendLine($"    <Object Type=\"{xmlType}\" Instance=\"{pt.Instance}\">");
             sb.AppendLine("      <Properties>");
+
+            // PROP_PROPERTY_LIST: List of all properties (required by explorers)
+            sb.AppendLine("        <Property Id=\"PROP_PROPERTY_LIST\" Tag=\"BACNET_APPLICATION_TAG_OBJECT_ID\">");
+            sb.AppendLine("          <Value>PROP_OBJECT_IDENTIFIER</Value>");
+            sb.AppendLine("          <Value>PROP_OBJECT_NAME</Value>");
+            sb.AppendLine("          <Value>PROP_OBJECT_TYPE</Value>");
+            sb.AppendLine("          <Value>PROP_DESCRIPTION</Value>");
+            sb.AppendLine("          <Value>PROP_PRESENT_VALUE</Value>");
+            sb.AppendLine("          <Value>PROP_OUT_OF_SERVICE</Value>");
+            sb.AppendLine("          <Value>PROP_STATUS_FLAGS</Value>");
+            sb.AppendLine("          <Value>PROP_EVENT_STATE</Value>");
+            if (!pt.IsBinary)
+            {
+                sb.AppendLine("          <Value>PROP_UNITS</Value>");
+                sb.AppendLine("          <Value>PROP_POLARITY</Value>");
+            }
+            sb.AppendLine("        </Property>");
+
             AppendProp(sb, "PROP_OBJECT_IDENTIFIER", "BACNET_APPLICATION_TAG_OBJECT_ID",         $"{xmlType}:{pt.Instance}");
             AppendProp(sb, "PROP_OBJECT_NAME",        "BACNET_APPLICATION_TAG_CHARACTER_STRING",  Esc(pt.Name));
             AppendProp(sb, "PROP_OBJECT_TYPE",        "BACNET_APPLICATION_TAG_ENUMERATED",        ((int)ToBacnetObjType(pt.ObjectType)).ToString());
@@ -171,7 +206,9 @@ namespace BacnetSim.Services
             {
                 var v = ((float)pt.PresentValue).ToString(System.Globalization.CultureInfo.InvariantCulture);
                 AppendProp(sb, "PROP_PRESENT_VALUE", "BACNET_APPLICATION_TAG_REAL", v);
-                AppendProp(sb, "PROP_UNITS",         "BACNET_APPLICATION_TAG_ENUMERATED", "62"); // no-units
+                // Map unit string to BACnet unit enumeration
+                var unitCode = GetBacnetUnitCode(pt.Units);
+                AppendProp(sb, "PROP_UNITS",         "BACNET_APPLICATION_TAG_ENUMERATED", unitCode);
             }
 
             AppendProp(sb, "PROP_OUT_OF_SERVICE", "BACNET_APPLICATION_TAG_BOOLEAN",    pt.OutOfService ? "True" : "False");
@@ -192,6 +229,39 @@ namespace BacnetSim.Services
         }
 
         private static string Esc(string s) => System.Security.SecurityElement.Escape(s) ?? s;
+
+        /// <summary>
+        /// Maps common unit strings to BACnet unit enumeration codes.
+        /// Reference: ASHRAE 135 BACnet Unit Codes
+        /// </summary>
+        private static string GetBacnetUnitCode(string unitString)
+        {
+            return unitString?.Trim().ToLowerInvariant() switch
+            {
+                "°c" or "c" or "celsius" => "0",      // UNITS_DEGREES_CELSIUS
+                "°f" or "f" or "fahrenheit" => "1",   // UNITS_DEGREES_FAHRENHEIT
+                "k" or "kelvin" => "2",                // UNITS_DEGREES_KELVIN
+                "%" or "percent" => "5",               // UNITS_PERCENT_RELATIVE_HUMIDITY
+                "ppm" => "6",                          // UNITS_PARTS_PER_MILLION
+                "rpm" => "7",                          // UNITS_REVOLUTIONS_PER_MINUTE
+                "hz" or "hertz" => "8",                // UNITS_HERTZ
+                "v" or "volt" or "volts" => "9",      // UNITS_VOLTS
+                "ma" or "milliamp" => "10",            // UNITS_MILLIAMPERES
+                "a" or "amp" or "ampere" => "11",     // UNITS_AMPERES
+                "w" or "watt" or "watts" => "14",      // UNITS_WATTS
+                "kw" or "kilowatt" => "15",            // UNITS_KILOWATTS
+                "kwh" or "kilowatt-hour" => "17",      // UNITS_KILOWATT_HOURS
+                "pa" or "pascal" => "28",              // UNITS_PASCALS
+                "kpa" or "kilopascal" => "29",         // UNITS_KILOPASCALS
+                "psi" => "30",                         // UNITS_POUNDS_FORCE_PER_SQUARE_INCH
+                "gpm" or "gallon" => "32",             // UNITS_GALLONS_PER_MINUTE
+                "cfm" or "cubic-foot" => "33",         // UNITS_CUBIC_FEET_PER_MINUTE
+                "m3/s" or "cubic-meter" => "34",       // UNITS_CUBIC_METERS_PER_SECOND
+                "psi_delta" => "64",                   // UNITS_PASCALS_PER_SECOND
+                "" or "nounit" or "no-unit" => "62",   // UNITS_NO_UNITS
+                _ => "62"  // Default to no-units for unknown
+            };
+        }
 
         #endregion
 
@@ -215,19 +285,27 @@ namespace BacnetSim.Services
         private void OnReadPropertyRequest(BacnetClient sender, BacnetAddress adr, byte invokeId,
             BacnetObjectId objectId, BacnetPropertyReference property, BacnetMaxSegments maxSegments)
         {
-            if (_storage == null) return;
+            if (_storage == null)
+            {
+                Log($"[ERROR] ReadProperty request but storage is null!");
+                return;
+            }
+
+            var propId = (BacnetPropertyIds)property.propertyIdentifier;
+            Log($"ReadProperty: {objectId} → {propId} (invoke={invokeId})");
+
             try
             {
                 IList<BacnetValue>? value;
                 DeviceStorage.ErrorCodes code;
                 lock (_lock)
                 {
-                    var propId = (BacnetPropertyIds)property.propertyIdentifier;
                     code = _storage.ReadProperty(objectId, propId, property.propertyArrayIndex, out value);
                 }
 
                 if (code == DeviceStorage.ErrorCodes.Good && value != null)
                 {
+                    Log($"  ✓ ReadProperty success: {value.Count} values");
                     sender.ReadPropertyResponse(adr, invokeId, sender.GetSegmentBuffer(maxSegments),
                         objectId, property, value);
                 }
@@ -236,13 +314,14 @@ namespace BacnetSim.Services
                     var errCode = code == DeviceStorage.ErrorCodes.UnknownObject
                         ? BacnetErrorCodes.ERROR_CODE_UNKNOWN_OBJECT
                         : BacnetErrorCodes.ERROR_CODE_UNKNOWN_PROPERTY;
+                    Log($"  ✗ ReadProperty failed: {code}");
                     sender.ErrorResponse(adr, BacnetConfirmedServices.SERVICE_CONFIRMED_READ_PROPERTY,
                         invokeId, BacnetErrorClasses.ERROR_CLASS_OBJECT, errCode);
                 }
             }
             catch (Exception ex)
             {
-                Log($"[ERROR] ReadProperty: {ex.Message}");
+                Log($"[ERROR] ReadProperty exception: {ex.Message}");
                 try
                 {
                     sender.ErrorResponse(adr, BacnetConfirmedServices.SERVICE_CONFIRMED_READ_PROPERTY,

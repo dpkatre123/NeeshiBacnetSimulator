@@ -151,6 +151,13 @@ namespace BacnetSim.ViewModels
             // Auto-load saved points
             LoadPoints();
 
+            // If no points were loaded, create defaults for discovery
+            if (Points.Count == 0)
+            {
+                CreateDefaultPoints();
+                SavePoints();
+            }
+
             // Auto-suggest next instance
             AutoInstance();
         }
@@ -320,6 +327,73 @@ namespace BacnetSim.ViewModels
             uint next = 0;
             while (used.Contains(next)) next++;
             NewInstance = next;
+        }
+
+        private void CreateDefaultPoints()
+        {
+            // Create one default point for each BACnet object type for easy discovery
+            var defaults = new[]
+            {
+                new BacnetPoint
+                {
+                    Name         = "Room Temperature",
+                    ObjectType   = BacnetObjectType.AnalogInput,
+                    Instance     = 0,
+                    PresentValue = 22.5,
+                    Units        = "°C",
+                    Description  = "Temperature sensor reading"
+                },
+                new BacnetPoint
+                {
+                    Name         = "Supply Air Damper",
+                    ObjectType   = BacnetObjectType.AnalogOutput,
+                    Instance     = 0,
+                    PresentValue = 50.0,
+                    Units        = "%",
+                    Description  = "Damper position control"
+                },
+                new BacnetPoint
+                {
+                    Name         = "Temperature Setpoint",
+                    ObjectType   = BacnetObjectType.AnalogValue,
+                    Instance     = 0,
+                    PresentValue = 21.0,
+                    Units        = "°C",
+                    Description  = "Desired temperature setpoint"
+                },
+                new BacnetPoint
+                {
+                    Name         = "Motion Detector",
+                    ObjectType   = BacnetObjectType.BinaryInput,
+                    Instance     = 0,
+                    PresentValue = 0,
+                    Units        = "",
+                    Description  = "Motion sensor status"
+                },
+                new BacnetPoint
+                {
+                    Name         = "Light Switch",
+                    ObjectType   = BacnetObjectType.BinaryOutput,
+                    Instance     = 0,
+                    PresentValue = 0,
+                    Units        = "",
+                    Description  = "Light on/off control"
+                },
+                new BacnetPoint
+                {
+                    Name         = "System Enable Flag",
+                    ObjectType   = BacnetObjectType.BinaryValue,
+                    Instance     = 0,
+                    PresentValue = 1,
+                    Units        = "",
+                    Description  = "System operational flag"
+                }
+            };
+
+            foreach (var pt in defaults)
+                Points.Add(pt);
+
+            AppendLog($"Created {defaults.Length} default BACnet points for discovery");
         }
 
         private void AppendLog(string msg)

@@ -6,7 +6,15 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <AssemblyName>NeeshiBacnetSim</AssemblyName>
+    <!-- Application icon: place an .ico at Assets\NeeshiIcon.ico -->
+    <ApplicationIcon>Assets\NeeshiIcon.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Include icon file if present; add your ICO here -->
+    <None Include="Assets\NeeshiIcon.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="BACnet" Version="3.0.2" />

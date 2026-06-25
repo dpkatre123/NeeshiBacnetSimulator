@@ -7,9 +7,9 @@ namespace BacnetSim.Models
     public class SimulatorDevice : INotifyPropertyChanged
     {
         private uint _deviceInstance = 1234;
-        private string _deviceName = "BACnet Simulator";
+        private string _deviceName = "NeeshiBacnetSim";
         private string _vendorName = "Antigravity Labs";
-        private string _modelName = "BacnetSim v1.0";
+        private string _modelName = "NeeshiBacnetSim v1.0";
         private string _networkInterface = "0.0.0.0";
         private int _port = 47808;
 
