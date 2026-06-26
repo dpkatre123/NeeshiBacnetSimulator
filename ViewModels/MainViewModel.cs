@@ -5,6 +5,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Threading;
 using BacnetSim.Models;
 using BacnetSim.Services;
 
@@ -34,6 +35,9 @@ namespace BacnetSim.ViewModels
         private string _logText = string.Empty;
         private BacnetPoint? _selectedPoint;
 
+        // Drives live value generation for simulated analog points
+        private readonly DispatcherTimer _simTimer;
+
         // ── form fields for new-point entry ───────────────────────────────
         private string _newName = "Analog Input";
         private BacnetObjectType _newType = BacnetObjectType.AnalogInput;
@@ -41,6 +45,11 @@ namespace BacnetSim.ViewModels
         private double _newValue = 0.0;
         private string _newUnits = "°C";
         private string _newDescription = "Temperature Sensor";
+        private AnalogSimulationMode _newSimulationMode = AnalogSimulationMode.Static;
+        private double _newSimMin = 0.0;
+        private double _newSimMax = 100.0;
+        private double _newSimStepMin = 0.5;
+        private double _newSimStepMax = 1.5;
 
         // ── persistence path ──────────────────────────────────────────────
         private static readonly string SavePath = Path.Combine(
@@ -94,6 +103,9 @@ namespace BacnetSim.ViewModels
             {
                 _newType = value;
                 OnPropertyChanged();
+                OnPropertyChanged(nameof(IsNewTypeAnalog));
+                OnPropertyChanged(nameof(IsRandomConfigVisible));
+                OnPropertyChanged(nameof(IsIncrementConfigVisible));
                 ApplyTypeDefaults();
                 AutoInstance();
             }
@@ -123,7 +135,53 @@ namespace BacnetSim.ViewModels
             set { _newDescription = value; OnPropertyChanged(); }
         }
 
+        public AnalogSimulationMode NewSimulationMode
+        {
+            get => _newSimulationMode;
+            set { _newSimulationMode = value; OnPropertyChanged(); OnPropertyChanged(nameof(IsRandomConfigVisible)); OnPropertyChanged(nameof(IsIncrementConfigVisible)); }
+        }
+
+        public double NewSimMin
+        {
+            get => _newSimMin;
+            set { _newSimMin = value; OnPropertyChanged(); }
+        }
+
+        public double NewSimMax
+        {
+            get => _newSimMax;
+            set { _newSimMax = value; OnPropertyChanged(); }
+        }
+
+        public double NewSimStepMin
+        {
+            get => _newSimStepMin;
+            set { _newSimStepMin = value; OnPropertyChanged(); }
+        }
+
+        public double NewSimStepMax
+        {
+            get => _newSimStepMax;
+            set { _newSimStepMax = value; OnPropertyChanged(); }
+        }
+
+        /// <summary>True when the new-point type is analog – simulation only applies to analog points.</summary>
+        public bool IsNewTypeAnalog =>
+            _newType is BacnetObjectType.AnalogInput
+                     or BacnetObjectType.AnalogOutput
+                     or BacnetObjectType.AnalogValue;
+
+        /// <summary>True only for Random mode – Min/Max bounds apply to Random only.</summary>
+        public bool IsRandomConfigVisible =>
+            IsNewTypeAnalog && _newSimulationMode == AnalogSimulationMode.Random;
+
+        /// <summary>True only for Increment mode, so the per-tick step range inputs show.</summary>
+        public bool IsIncrementConfigVisible =>
+            IsNewTypeAnalog && _newSimulationMode == AnalogSimulationMode.Increment;
+
         public IEnumerable<BacnetObjectType> ObjectTypes => Enum.GetValues<BacnetObjectType>();
+
+        public IEnumerable<AnalogSimulationMode> SimulationModes => Enum.GetValues<AnalogSimulationMode>();
 
         // ── commands ──────────────────────────────────────────────────────
         public ICommand StartCommand   { get; }
@@ -148,6 +206,10 @@ namespace BacnetSim.ViewModels
             _service.LogMessage       += AppendLog;
             _service.PointValueChanged += pt => { /* value already updated by service on Dispatcher */ };
 
+            // Timer that drives Random / Incrementing analog values every 5 seconds
+            _simTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
+            _simTimer.Tick += OnSimTick;
+
             // Auto-load saved points
             LoadPoints();
 
@@ -170,6 +232,9 @@ namespace BacnetSim.ViewModels
                 _service.Start(Device);
                 IsRunning  = true;
                 StatusText = $"Running · Device {Device.DeviceInstance} · Port {Device.Port}";
+
+                // Begin live value generation if any analog point is simulated
+                _simTimer.Start();
             }
             catch (Exception ex)
             {
@@ -181,9 +246,24 @@ namespace BacnetSim.ViewModels
 
         private void Stop()
         {
+            _simTimer.Stop();
             _service.Stop();
             IsRunning  = false;
             StatusText = "Stopped";
+        }
+
+        // Fires once per second while the server runs: advances every simulated
+        // analog point and pushes the new value into the BACnet storage so that
+        // remote clients see the live change.
+        private void OnSimTick(object? sender, EventArgs e)
+        {
+            if (!_isRunning) return;
+
+            foreach (var pt in Points)
+            {
+                if (pt.AdvanceSimulation())
+                    _service.UpdatePointValue(pt);
+            }
         }
 
         // ── point management ──────────────────────────────────────────────
@@ -212,6 +292,16 @@ namespace BacnetSim.ViewModels
                 Units        = NewUnits,
                 Description  = NewDescription
             };
+
+            // Simulation only applies to analog points
+            if (pt.IsAnalog)
+            {
+                pt.SimulationMode = NewSimulationMode;
+                pt.SimMin         = NewSimMin;
+                pt.SimMax         = NewSimMax;
+                pt.SimStepMin     = NewSimStepMin;
+                pt.SimStepMax     = NewSimStepMax;
+            }
 
             Points.Add(pt);
 
@@ -286,6 +376,10 @@ namespace BacnetSim.ViewModels
                     NewValue       = 0.0;
                     NewUnits       = "°C";
                     NewDescription = "Temperature Sensor";
+                    NewSimMin      = 0.0;
+                    NewSimMax      = 100.0;
+                    NewSimStepMin  = 0.5;
+                    NewSimStepMax  = 1.5;
                     break;
                 case BacnetObjectType.AnalogOutput:
                     NewName        = "Analog Output";
@@ -304,18 +398,21 @@ namespace BacnetSim.ViewModels
                     NewValue       = 0;
                     NewUnits       = string.Empty;
                     NewDescription = "Digital Input";
+                    NewSimulationMode = AnalogSimulationMode.Static;
                     break;
                 case BacnetObjectType.BinaryOutput:
                     NewName        = "Binary Output";
                     NewValue       = 0;
                     NewUnits       = string.Empty;
                     NewDescription = "Relay Output";
+                    NewSimulationMode = AnalogSimulationMode.Static;
                     break;
                 case BacnetObjectType.BinaryValue:
                     NewName        = "Binary Value";
                     NewValue       = 0;
                     NewUnits       = string.Empty;
                     NewDescription = "Binary Flag";
+                    NewSimulationMode = AnalogSimulationMode.Static;
                     break;
             }
         }
@@ -415,6 +512,7 @@ namespace BacnetSim.ViewModels
 
         public void Dispose()
         {
+            _simTimer.Stop();
             SavePoints();
             _service.Dispose();
         }

@@ -335,7 +335,8 @@
 
             <!-- ── Left: Add Point Form ──────────────────────────── -->
             <Border Grid.Column="0" Style="{StaticResource Card}">
-                <StackPanel>
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Margin="0,0,6,0">
                     <TextBlock Style="{StaticResource SectionTitle}">➕  Add Point</TextBlock>
 
                     <TextBlock Style="{StaticResource Label}">Point Name</TextBlock>
@@ -365,6 +366,60 @@
                     <TextBlock Style="{StaticResource Label}">Description</TextBlock>
                     <TextBox Text="{Binding NewDescription, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,16"/>
 
+                    <!-- ── Value Simulation (analog points only) ── -->
+                    <StackPanel Visibility="{Binding IsNewTypeAnalog, Converter={StaticResource BoolToVisibility}}">
+                        <TextBlock Style="{StaticResource Label}">Value Generation</TextBlock>
+                        <ComboBox ItemsSource="{Binding SimulationModes}"
+                                  SelectedItem="{Binding NewSimulationMode}" Margin="0,0,0,10"
+                                  ToolTip="Static = manual · Random = random within range · Increment = rise by random step">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding}" Foreground="{StaticResource TextPrimary}"/>
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+
+                        <StackPanel Visibility="{Binding IsRandomConfigVisible, Converter={StaticResource BoolToVisibility}}">
+                            <Grid Margin="0,0,0,10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition/>
+                                    <ColumnDefinition Width="8"/>
+                                    <ColumnDefinition/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Style="{StaticResource Label}">Min</TextBlock>
+                                    <TextBox Text="{Binding NewSimMin, UpdateSourceTrigger=PropertyChanged}"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Style="{StaticResource Label}">Max</TextBlock>
+                                    <TextBox Text="{Binding NewSimMax, UpdateSourceTrigger=PropertyChanged}"/>
+                                </StackPanel>
+                            </Grid>
+                        </StackPanel>
+
+                        <!-- Increment-only: random step range added every 5 s (value only rises) -->
+                        <StackPanel Visibility="{Binding IsIncrementConfigVisible, Converter={StaticResource BoolToVisibility}}">
+                            <TextBlock Style="{StaticResource Label}">Increment Step (per 5 s)</TextBlock>
+                            <Grid Margin="0,0,0,16">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition/>
+                                    <ColumnDefinition Width="8"/>
+                                    <ColumnDefinition/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Style="{StaticResource Label}">Step Min</TextBlock>
+                                    <TextBox Text="{Binding NewSimStepMin, UpdateSourceTrigger=PropertyChanged}"
+                                             ToolTip="Smallest random amount added each tick, e.g. 0.5"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Style="{StaticResource Label}">Step Max</TextBlock>
+                                    <TextBox Text="{Binding NewSimStepMax, UpdateSourceTrigger=PropertyChanged}"
+                                             ToolTip="Largest random amount added each tick, e.g. 1.5"/>
+                                </StackPanel>
+                            </Grid>
+                        </StackPanel>
+                    </StackPanel>
+
                     <Button Content="Add Point" Style="{StaticResource BtnPrimary}"
                             Command="{Binding AddPointCommand}" HorizontalAlignment="Stretch"/>
 
@@ -391,7 +446,8 @@
                             Command="{Binding RemovePointCommand}"
                             CommandParameter="{Binding SelectedPoint}"
                             HorizontalAlignment="Stretch"/>
-                </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
             </Border>
 
             <!-- ── Right: Points DataGrid ─────────────────────────── -->
@@ -465,6 +521,9 @@
 
                             <!-- Units -->
                             <DataGridTextColumn Header="Units" Binding="{Binding Units}" Width="80" IsReadOnly="True"/>
+
+                            <!-- Generation mode (analog) -->
+                            <DataGridTextColumn Header="Generation" Binding="{Binding SimulationLabel}" Width="90" IsReadOnly="True"/>
 
                             <!-- Description -->
                             <DataGridTextColumn Header="Description" Binding="{Binding Description}" Width="140" IsReadOnly="True"/>
