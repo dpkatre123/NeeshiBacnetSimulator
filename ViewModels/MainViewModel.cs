@@ -4,6 +4,7 @@ using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Windows;
+using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Threading;
 using BacnetSim.Models;
@@ -34,6 +35,7 @@ namespace BacnetSim.ViewModels
         private string _statusText = "Stopped";
         private string _logText = string.Empty;
         private BacnetPoint? _selectedPoint;
+        private string _searchText = string.Empty;
 
         // Drives live value generation for simulated analog points
         private readonly DispatcherTimer _simTimer;
@@ -88,6 +90,28 @@ namespace BacnetSim.ViewModels
             get => _selectedPoint;
             set { _selectedPoint = value; OnPropertyChanged(); }
         }
+
+        /// <summary>Free-text search applied to the points grid (case-insensitive substring).</summary>
+        public string SearchText
+        {
+            get => _searchText;
+            set
+            {
+                _searchText = value ?? string.Empty;
+                OnPropertyChanged();
+                PointsView.Refresh();
+                OnPropertyChanged(nameof(PointsCountLabel));
+            }
+        }
+
+        /// <summary>Filtered view over <see cref="Points"/> driving the DataGrid; honours <see cref="SearchText"/>.</summary>
+        public ICollectionView PointsView { get; }
+
+        /// <summary>Badge text: total count, or "shown / total" while a search filter is active.</summary>
+        public string PointsCountLabel =>
+            string.IsNullOrWhiteSpace(_searchText)
+                ? Points.Count.ToString()
+                : $"{PointsView.Cast<BacnetPoint>().Count()} / {Points.Count}";
 
         // ── new-point form bindings ───────────────────────────────────────
         public string NewName
@@ -191,6 +215,7 @@ namespace BacnetSim.ViewModels
         public ICommand ClearLogCommand    { get; }
         public ICommand SaveCommand        { get; }
         public ICommand LoadCommand        { get; }
+        public ICommand ClearSearchCommand { get; }
 
         // ─────────────────────────────────────────────────────────────────
         public MainViewModel()
@@ -202,6 +227,7 @@ namespace BacnetSim.ViewModels
             ClearLogCommand    = new RelayCommand(_ => LogText = string.Empty);
             SaveCommand        = new RelayCommand(_ => SavePoints());
             LoadCommand        = new RelayCommand(_ => LoadPoints());
+            ClearSearchCommand = new RelayCommand(_ => SearchText = string.Empty, _ => !string.IsNullOrEmpty(SearchText));
 
             _service.LogMessage       += AppendLog;
             _service.PointValueChanged += pt => { /* value already updated by service on Dispatcher */ };
@@ -219,6 +245,11 @@ namespace BacnetSim.ViewModels
                 CreateDefaultPoints();
                 SavePoints();
             }
+
+            // Build the filtered view over Points for the search box (the DataGrid renders via this default view)
+            PointsView = CollectionViewSource.GetDefaultView(Points);
+            PointsView.Filter = FilterPoint;
+            Points.CollectionChanged += (_, _) => OnPropertyChanged(nameof(PointsCountLabel));
 
             // Auto-suggest next instance
             AutoInstance();
@@ -419,11 +450,27 @@ namespace BacnetSim.ViewModels
 
         private void AutoInstance()
         {
-            // Suggest the next unused instance for the current type
-            var used = Points.Where(p => p.ObjectType == NewType).Select(p => p.Instance).ToHashSet();
-            uint next = 0;
-            while (used.Contains(next)) next++;
-            NewInstance = next;
+            // Suggest the next incremented instance for the current type (highest existing + 1)
+            var sameType = Points.Where(p => p.ObjectType == NewType).Select(p => p.Instance).ToList();
+            NewInstance = sameType.Count == 0 ? 0u : sameType.Max() + 1;
+        }
+
+        // Predicate used by PointsView to filter the grid against SearchText.
+        private bool FilterPoint(object obj)
+        {
+            if (string.IsNullOrWhiteSpace(_searchText))
+                return true;
+
+            if (obj is not BacnetPoint pt)
+                return false;
+
+            var term = _searchText.Trim().ToLowerInvariant();
+
+            return pt.Name.ToLowerInvariant().Contains(term)
+                || pt.Description.ToLowerInvariant().Contains(term)
+                || pt.TypeLabel.ToLowerInvariant().Contains(term)
+                || pt.Units.ToLowerInvariant().Contains(term)
+                || pt.Instance.ToString().Contains(term);
         }
 
         private void CreateDefaultPoints()

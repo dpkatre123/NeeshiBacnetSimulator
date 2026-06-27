@@ -461,15 +461,52 @@
                     <!-- Header bar -->
                     <Border Grid.Row="0" Background="#181B29" CornerRadius="10,10,0,0" Padding="16,12">
                         <Grid>
-                            <StackPanel Orientation="Horizontal">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <!-- Title + count badge -->
+                            <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
                                 <TextBlock Style="{StaticResource SectionTitle}" Margin="0" Text="📋  Configured Points"/>
                                 <Border Background="{StaticResource Accent}" CornerRadius="12" Padding="8,2" Margin="12,0,0,0" VerticalAlignment="Center">
-                                    <TextBlock Text="{Binding Points.Count}" Foreground="White" FontSize="11" FontWeight="Bold"/>
+                                    <TextBlock Text="{Binding PointsCountLabel}" Foreground="White" FontSize="11" FontWeight="Bold"/>
                                 </Border>
                             </StackPanel>
-                            <TextBlock HorizontalAlignment="Right" VerticalAlignment="Center"
-                                       Style="{StaticResource Label}" Margin="0"
+
+                            <!-- Edit hint -->
+                            <TextBlock Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                       Style="{StaticResource Label}" Margin="12,0,12,0"
                                        Text="Double-click Present Value to edit"/>
+
+                            <!-- Search box -->
+                            <Grid Grid.Column="2" Width="240" VerticalAlignment="Center">
+                                <TextBox x:Name="SearchBox"
+                                         Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                                         Padding="10,5,28,5" VerticalContentAlignment="Center"
+                                         ToolTip="Search by name, type, instance, units or description"/>
+                                <TextBlock Text="🔍  Search points…" IsHitTestVisible="False"
+                                           Foreground="{StaticResource TextMuted}" Margin="11,0,0,0"
+                                           VerticalAlignment="Center">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Text, ElementName=SearchBox}" Value="">
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                                <Button Content="✕" Command="{Binding ClearSearchCommand}"
+                                        Style="{StaticResource BtnBase}"
+                                        Background="Transparent" Foreground="{StaticResource TextMuted}"
+                                        Width="24" Height="24" Padding="0" FontSize="12"
+                                        HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,4,0"
+                                        ToolTip="Clear search"/>
+                            </Grid>
                         </Grid>
                     </Border>
 
