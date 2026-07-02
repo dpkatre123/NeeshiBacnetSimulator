@@ -216,6 +216,9 @@ namespace BacnetSim.ViewModels
         public ICommand SaveCommand        { get; }
         public ICommand LoadCommand        { get; }
         public ICommand ClearSearchCommand { get; }
+        public ICommand AddScheduleCommand { get; }
+        public ICommand RemoveScheduleCommand { get; }
+        public ICommand SaveSchedulesCommand { get; }
 
         // ─────────────────────────────────────────────────────────────────
         public MainViewModel()
@@ -228,6 +231,19 @@ namespace BacnetSim.ViewModels
             SaveCommand        = new RelayCommand(_ => SavePoints());
             LoadCommand        = new RelayCommand(_ => LoadPoints());
             ClearSearchCommand = new RelayCommand(_ => SearchText = string.Empty, _ => !string.IsNullOrEmpty(SearchText));
+            AddScheduleCommand = new RelayCommand(_ => {
+                var s = new BacnetSchedule { Name = "New Schedule" };
+                Schedules.Add(s);
+                SelectedSchedule = s;
+                SaveSchedules();
+            });
+            RemoveScheduleCommand = new RelayCommand(_ => {
+                if (SelectedSchedule == null) return;
+                Schedules.Remove(SelectedSchedule);
+                SelectedSchedule = null;
+                SaveSchedules();
+            }, _ => SelectedSchedule != null);
+            SaveSchedulesCommand = new RelayCommand(_ => SaveSchedules());
 
             _service.LogMessage       += AppendLog;
             _service.PointValueChanged += pt => { /* value already updated by service on Dispatcher */ };
@@ -238,6 +254,17 @@ namespace BacnetSim.ViewModels
 
             // Auto-load saved points
             LoadPoints();
+
+            // Auto-load saved schedules
+            LoadSchedules();
+
+            // If no schedules were loaded, create a demo schedule
+            if (Schedules.Count == 0)
+            {
+                Schedules.Add(BacnetSchedule.Sample());
+                SaveSchedules();
+                AppendLog($"Created {Schedules.Count} default schedule(s) for demo");
+            }
 
             // If no points were loaded, create defaults for discovery
             if (Points.Count == 0)
@@ -253,6 +280,13 @@ namespace BacnetSim.ViewModels
 
             // Auto-suggest next instance
             AutoInstance();
+        }
+
+        private BacnetSchedule? _selectedSchedule;
+        public BacnetSchedule? SelectedSchedule
+        {
+            get => _selectedSchedule;
+            set { _selectedSchedule = value; OnPropertyChanged(); }
         }
 
         // ── server control ────────────────────────────────────────────────
@@ -394,6 +428,46 @@ namespace BacnetSim.ViewModels
             catch (Exception ex)
             {
                 AppendLog($"[ERROR] Load failed: {ex.Message}");
+            }
+        }
+
+        // ── schedules persistence ───────────────────────────────────────────
+        private static readonly string ScheduleSavePath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "BacnetSim", "schedules.json");
+
+        public System.Collections.ObjectModel.ObservableCollection<BacnetSchedule> Schedules { get; } = new();
+
+        private void SaveSchedules()
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(ScheduleSavePath)!);
+                var json = JsonSerializer.Serialize(Schedules.ToList(), new JsonSerializerOptions { WriteIndented = true });
+                File.WriteAllText(ScheduleSavePath, json);
+                AppendLog($"Saved {Schedules.Count} schedules → {ScheduleSavePath}");
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"[ERROR] Save schedules failed: {ex.Message}");
+            }
+        }
+
+        private void LoadSchedules()
+        {
+            if (!File.Exists(ScheduleSavePath)) return;
+            try
+            {
+                var json = File.ReadAllText(ScheduleSavePath);
+                var list = JsonSerializer.Deserialize<List<BacnetSchedule>>(json);
+                if (list == null) return;
+                Schedules.Clear();
+                foreach (var s in list) Schedules.Add(s);
+                AppendLog($"Loaded {Schedules.Count} schedules from {ScheduleSavePath}");
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"[ERROR] Load schedules failed: {ex.Message}");
             }
         }
 
