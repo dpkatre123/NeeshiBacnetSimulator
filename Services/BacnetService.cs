@@ -1,5 +1,6 @@
 using System.IO;
 using System.IO.BACnet;
+using System.Text.Json;
 using System.IO.BACnet.Storage;
 using System.Windows;
 using BacnetSim.Models;
@@ -48,6 +49,61 @@ namespace BacnetSim.Services
                 {
                     _storage = DeviceStorage.Load(_tmpXmlPath, device.DeviceInstance);
                     Log($"Storage loaded. Device {_storage?.DeviceId}");
+
+                    // Diagnostic: log whether the generated XML contains schedule objects
+                    try
+                    {
+                        var xmlText = File.ReadAllText(_tmpXmlPath);
+                        Log($"Diagnostic: XML contains OBJECT_SCHEDULE = {xmlText.Contains("OBJECT_SCHEDULE")} (file: {_tmpXmlPath})");
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"[DIAG] Failed reading generated XML: {ex.Message}");
+                    }
+
+                    // Diagnostic: attempt to read schedule objects from loaded storage
+                    try
+                    {
+                        Log("Diagnostic: enumerating expected schedule instances from storage...");
+                        uint schedBase = 1000;
+                        var schedCount = device.Schedules?.Count ?? 0;
+                        for (int i = 0; i < schedCount; i++)
+                        {
+                            uint instance = schedBase + (uint)i;
+                            var objId = new BacnetObjectId(BacnetObjectTypes.OBJECT_SCHEDULE, instance);
+                            try
+                            {
+                                IList<BacnetPropertyValue>? vals;
+                                _storage.ReadPropertyAll(objId, out vals);
+                                if (vals == null)
+                                {
+                                    Log($"  Schedule {instance}: ReadPropertyAll returned null");
+                                    continue;
+                                }
+
+                                Log($"  Schedule {instance}: property count = {vals.Count}");
+                                bool hasWeekly = false;
+                                foreach (var pv in vals)
+                                {
+                                    try
+                                    {
+                                        if (pv.property.propertyIdentifier == (uint)BacnetPropertyIds.PROP_WEEKLY_SCHEDULE)
+                                            hasWeekly = true;
+                                    }
+                                    catch { }
+                                }
+                                Log($"    PROP_WEEKLY_SCHEDULE present = {hasWeekly}");
+                            }
+                            catch (Exception ex)
+                            {
+                                Log($"  Schedule {instance}: ReadPropertyAll threw: {ex.Message}");
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"[DIAG] Error enumerating schedules in storage: {ex.Message}");
+                    }
                 }
                 catch (Exception storageEx)
                 {
@@ -210,6 +266,7 @@ namespace BacnetSim.Services
 
         private static void AppendScheduleXml(System.Text.StringBuilder sb, BacnetSchedule sched, uint instance)
         {
+            // Build a full BACnet SCHEDULE object representation.
             sb.AppendLine($"    <Object Type=\"OBJECT_SCHEDULE\" Instance=\"{instance}\">");
             sb.AppendLine("      <Properties>");
             sb.AppendLine("        <Property Id=\"PROP_PROPERTY_LIST\" Tag=\"BACNET_APPLICATION_TAG_OBJECT_ID\">");
@@ -225,8 +282,17 @@ namespace BacnetSim.Services
             AppendProp(sb, "PROP_OBJECT_NAME", "BACNET_APPLICATION_TAG_CHARACTER_STRING", Esc(sched.Name));
             AppendProp(sb, "PROP_DESCRIPTION", "BACNET_APPLICATION_TAG_CHARACTER_STRING", Esc(sched.Name ?? string.Empty));
 
-            // Minimal schedule representation: expose number of entries via description or custom property
-            AppendProp(sb, "PROP_SCHEDULE_ENTRY_COUNT", "BACNET_APPLICATION_TAG_UNSIGNED_INT", sched.Entries?.Count.ToString() ?? "0");
+            // EFFECTIVE_PERIOD: write as simple character string (start/end)
+            AppendProp(sb, "PROP_EFFECTIVE_PERIOD", "BACNET_APPLICATION_TAG_CHARACTER_STRING", "0001-01-01/9999-12-31");
+
+            // WEEKLY_SCHEDULE: serialize entries into a JSON string so DeviceStorage treats it as a simple property
+            string weeklyJson = "[]";
+            try
+            {
+                weeklyJson = JsonSerializer.Serialize(sched.Entries ?? new System.Collections.Generic.List<BacnetSchedule.ScheduleEntry>());
+            }
+            catch { }
+            AppendProp(sb, "PROP_WEEKLY_SCHEDULE", "BACNET_APPLICATION_TAG_CHARACTER_STRING", Esc(weeklyJson));
 
             sb.AppendLine("      </Properties>");
             sb.AppendLine("    </Object>");
