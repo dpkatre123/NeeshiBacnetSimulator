@@ -39,11 +39,11 @@ namespace BacnetSim.Services
             {
                 // 1. Write XML to a temp file (DeviceStorage.Load only accepts file path)
                 _tmpXmlPath = Path.Combine(Path.GetTempPath(), $"bacnet_sim_{device.DeviceInstance}.xml");
-                var xml = BuildXml(device);
+                var xml = BuildXml(device, includeSchedules: true);
                 File.WriteAllText(_tmpXmlPath, xml);
                 Log($"Storage XML written to: {_tmpXmlPath}");
 
-                // 2. Load storage from file
+                // 2. Load storage from file (try with schedules first; on failure try without schedules)
                 try
                 {
                     _storage = DeviceStorage.Load(_tmpXmlPath, device.DeviceInstance);
@@ -51,8 +51,37 @@ namespace BacnetSim.Services
                 }
                 catch (Exception storageEx)
                 {
-                    Log($"[ERROR] Storage load failed: {storageEx.Message}");
+                    Log($"[ERROR] Storage load failed (with schedules): {storageEx}");
                     _storage = null;
+
+                    // Attempt a fallback: rebuild XML without schedules and try again so points remain discoverable
+                    if (device.Schedules != null && device.Schedules.Count > 0)
+                    {
+                        try
+                        {
+                            var tmpNoSched = Path.Combine(Path.GetTempPath(), $"bacnet_sim_{device.DeviceInstance}_nosched.xml");
+                            var xml2 = BuildXml(device, includeSchedules: false);
+                            File.WriteAllText(tmpNoSched, xml2);
+                            Log($"Attempting fallback storage (no schedules) written to: {tmpNoSched}");
+                            _storage = DeviceStorage.Load(tmpNoSched, device.DeviceInstance);
+                            _tmpXmlPath = tmpNoSched; // replace path so we keep the working storage file
+                            Log($"Fallback storage loaded (no schedules). Device {_storage?.DeviceId}");
+                        }
+                        catch (Exception fallbackEx)
+                        {
+                            Log($"[ERROR] Fallback storage load failed: {fallbackEx}");
+                            _storage = null;
+                        }
+                    }
+                }
+
+                // If storage failed to load we must not start the BACnet server because
+                // incoming ReadProperty requests require a valid DeviceStorage instance.
+                if (_storage == null)
+                {
+                    Log("[ERROR] DeviceStorage is null after load; aborting start.");
+                    Stop();
+                    return;
                 }
 
                 // 3. Register point map for write-back
@@ -121,7 +150,7 @@ namespace BacnetSim.Services
         // ──────────────────────────────────────────────────────────────────
         #region XML Storage Builder
 
-        private static string BuildXml(SimulatorDevice device)
+        private static string BuildXml(SimulatorDevice device, bool includeSchedules = true)
         {
             var sb = new System.Text.StringBuilder();
             sb.AppendLine("<?xml version=\"1.0\"?>");
@@ -164,9 +193,43 @@ namespace BacnetSim.Services
             foreach (var pt in device.Points)
                 AppendPointXml(sb, pt);
 
+            // ── Schedule objects ───────────────────────────────────────────
+            if (includeSchedules && device.Schedules != null)
+            {
+                uint schedBase = 1000;
+                for (int i = 0; i < device.Schedules.Count; i++)
+                {
+                    AppendScheduleXml(sb, device.Schedules[i], schedBase + (uint)i);
+                }
+            }
+
             sb.AppendLine("  </Objects>");
             sb.AppendLine("</DeviceStorage>");
             return sb.ToString();
+        }
+
+        private static void AppendScheduleXml(System.Text.StringBuilder sb, BacnetSchedule sched, uint instance)
+        {
+            sb.AppendLine($"    <Object Type=\"OBJECT_SCHEDULE\" Instance=\"{instance}\">");
+            sb.AppendLine("      <Properties>");
+            sb.AppendLine("        <Property Id=\"PROP_PROPERTY_LIST\" Tag=\"BACNET_APPLICATION_TAG_OBJECT_ID\">");
+            sb.AppendLine("          <Value>PROP_OBJECT_IDENTIFIER</Value>");
+            sb.AppendLine("          <Value>PROP_OBJECT_NAME</Value>");
+            sb.AppendLine("          <Value>PROP_OBJECT_TYPE</Value>");
+            sb.AppendLine("          <Value>PROP_DESCRIPTION</Value>");
+            sb.AppendLine("          <Value>PROP_EFFECTIVE_PERIOD</Value>");
+            sb.AppendLine("          <Value>PROP_WEEKLY_SCHEDULE</Value>");
+            sb.AppendLine("        </Property>");
+
+            AppendProp(sb, "PROP_OBJECT_IDENTIFIER", "BACNET_APPLICATION_TAG_OBJECT_ID", $"OBJECT_SCHEDULE:{instance}");
+            AppendProp(sb, "PROP_OBJECT_NAME", "BACNET_APPLICATION_TAG_CHARACTER_STRING", Esc(sched.Name));
+            AppendProp(sb, "PROP_DESCRIPTION", "BACNET_APPLICATION_TAG_CHARACTER_STRING", Esc(sched.Name ?? string.Empty));
+
+            // Minimal schedule representation: expose number of entries via description or custom property
+            AppendProp(sb, "PROP_SCHEDULE_ENTRY_COUNT", "BACNET_APPLICATION_TAG_UNSIGNED_INT", sched.Entries?.Count.ToString() ?? "0");
+
+            sb.AppendLine("      </Properties>");
+            sb.AppendLine("    </Object>");
         }
 
         private static void AppendPointXml(System.Text.StringBuilder sb, BacnetPoint pt)

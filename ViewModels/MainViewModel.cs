@@ -463,6 +463,9 @@ namespace BacnetSim.ViewModels
                 if (list == null) return;
                 Schedules.Clear();
                 foreach (var s in list) Schedules.Add(s);
+                // Sync into device for BACnet exposure
+                Device.Schedules.Clear();
+                foreach (var s in Schedules) Device.Schedules.Add(s);
                 AppendLog($"Loaded {Schedules.Count} schedules from {ScheduleSavePath}");
             }
             catch (Exception ex)

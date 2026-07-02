@@ -51,6 +51,9 @@ namespace BacnetSim.Models
 
         public ObservableCollection<BacnetPoint> Points { get; set; } = [];
 
+        // Schedules available on the virtual device (not yet part of original project)
+        public System.Collections.ObjectModel.ObservableCollection<BacnetSchedule> Schedules { get; set; } = new();
+
         public event PropertyChangedEventHandler? PropertyChanged;
         protected void OnPropertyChanged([CallerMemberName] string? name = null)
             => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
